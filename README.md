@@ -138,6 +138,109 @@ zones:
     paths: [dmz, transfer]
 ```
 
+## Learn mode: understand the data before judging it
+
+The gap runs both ways. An IT security engineer knows ACLs and threat models but has never
+opened an SCD. A protection engineer knows the substation but was never told what
+`Everyone:(RX)` means. They are usually in the same meeting, talking past each other.
+
+```bash
+otdatamap learn --track it        # OT explained for people who know IT security
+otdatamap learn --track ot        # IT security explained for people who know the plant
+otdatamap learn substation-config # one topic
+otdatamap learn --glossary GOOSE  # one term
+```
+
+25 lessons: one per data class, plus the concepts that cause the most confusion — the
+inverted CIA priority, Purdue, zones and conduits, protocols without authentication, why
+nothing gets fixed this afternoon, and from the other direction, what an ACL really says,
+data classification, credential rotation and what makes evidence hold up. Each lesson has
+the same shape:
+
+| Section | What it does |
+|---|---|
+| What it is | The plain description |
+| **Coming from the other side** | The nearest analogy from the other discipline — **and where that analogy breaks**, which is the part that actually teaches |
+| Why it matters | The consequence framing |
+| What an adversary gains | **Generated from the tool's own ATT&CK mapping**, never hand-written, so the lesson cannot drift from what the scanner reports |
+| Go and look | Three questions to take to your own plant |
+| Terms, Read next | Glossary entries used, and real sources |
+
+**Point it at a real file.** This is the part worth having: the lesson is anchored to
+something the learner actually holds.
+
+```bash
+otdatamap learn --file ./backup/EX-SW-BAY1_running-config.cfg
+```
+
+prints the lesson for that kind of file, then what the engine sees in *that* file — its
+class and how confidently it matched, who can read it, every signal, and the techniques it
+enables. Teaching and assessment in one screen.
+
+**A quiz**, generated from the lessons and the ATT&CK mapping rather than written by hand,
+so it stays in step when the content changes:
+
+```bash
+otdatamap learn --quiz                 # ask interactively
+otdatamap learn --quiz --sheet         # print questions and answers for a classroom
+otdatamap learn --html study-pack.html --quiz
+```
+
+![Study pack](docs/images/study-pack.png)
+
+The study pack is one self-contained HTML file with no scripts — email it, print it, or put
+it on a training share. In the GUI, select any row and press **What is this?** to get the
+same lesson for the file in front of you.
+
+Lessons live in `otdatamap/rules/lessons.yaml`. **A lesson that is wrong for your plant is
+a bug worth reporting** — that is the contribution this project most wants.
+
+## What this data buys an attacker
+
+Engineering data is reconnaissance that has already been done, and a credential in a config
+file is lateral movement that has already been paid for. So every exposed object is mapped
+onto **MITRE ATT&CK for ICS**, from two directions:
+
+- **the finding** — what the exposure itself buys, whatever the file is. A cleartext
+  password buys `T0859 Valid Accounts` and `T1694 Insecure Credentials`; a restricted file
+  on a USB stick buys `T0847 Replication Through Removable Media`.
+- **the data class** — what the content buys once an adversary holds a copy. An SCD names
+  every IED with its address and every GOOSE control block with its APPID and destination
+  MAC, so it buys `T0840 Network Connection Enumeration`, `T0846 Remote System Discovery`,
+  `T0861 Point & Tag Identification` and, for a spoofed publisher to be believed,
+  `T0848 Rogue Master`.
+
+Class techniques only count when the object is **actually exposed**. Data sitting correctly
+inside its zone is not an adversary capability — it is the plant working as designed. That
+single rule is what keeps this from being a wall of decorative technique IDs.
+
+![ATT&CK for ICS section of the report](docs/images/attack-ics.png)
+
+```bash
+otdatamap attack                              # the whole mapping, with the reasoning
+otdatamap attack --class plc-program          # just one class
+otdatamap scan ./site --attack-layer layer.json
+```
+
+`--attack-layer` writes an **ATT&CK Navigator layer** (`ics-attack`, layer format 4.5),
+scored by how many exposed objects enable each technique, with the finding or class that
+caused it in the comment. Drop it into [Navigator](https://mitre-attack.github.io/attack-navigator/)
+and the matrix lights up with what your file shares alone hand over.
+
+```
+ATT&CK for ICS: 30 techniques across 10 tactics are paid for by this data
+  T0811        Data from Information Repositories             15 objects
+  T0859        Valid Accounts                                 14 objects
+  T0893        Data from Local System                         14 objects
+  T0882        Theft of Operational Information               13 objects
+  T0840        Network Connection Enumeration                  8 objects
+```
+
+The mapping lives in `otdatamap/rules/attack_ics.yaml` — 41 techniques, each with its
+tactics, and a `why` line per data class that is meant to be argued with. Override the
+whole file with `--attack my_attack.yaml`. Technique IDs follow the current ICS matrix,
+including the folded ones (`T0812` → `T1694.001`, `T0857`/`T0839` → `T1693.001`/`.002`).
+
 ## Tell me what changed
 
 A single scan says "47 objects are restricted", which shocks a room once and is then
@@ -215,7 +318,8 @@ otdatamap scan ./site --no-archives       # do not open zip / TIA packages
 
 - **HTML** — summary cards, what data is here, sensitivity split, per-zone table, findings
   with 62443/ATT&CK mapping, and the flagged objects ranked by risk
-- **JSON** — every object with its class, signals, findings and SHA-256
+- **JSON** — every object with its class, signals, findings, enabled techniques and SHA-256,
+  plus the per-tactic ATT&CK rollup
 - **CSV** — the data inventory itself, ready for the register you have to maintain anyway
 
 ## Make it yours
@@ -229,6 +333,8 @@ otdatamap scan ./site --classes my_classes.yaml --rules my_exposure.yaml
 
 - `--classes` adds or replaces data classes (same `id` wins over the default)
 - `--rules` changes path patterns, secret regexes, thresholds and severity bands
+- `--attack` replaces the ATT&CK for ICS mapping
+- `--lessons` replaces the study material (`otdatamap learn --lessons mine.yaml`)
 
 Site naming conventions differ everywhere, so the location patterns (`*/vendor*/*`,
 `*/onedrive*/*`, …) are the first thing most people will want to edit.
@@ -250,7 +356,8 @@ desktop interface.
 - It does not open proprietary binary projects (TIA, ACD, WinCC); those are classified by
   name and extension. Pair it with a parser-level tool when you need what is inside.
 - Risk scores are a prioritisation aid, not an assessment. The 62443 and ATT&CK references
-  are evidence pointers for a human assessor, not a compliance verdict.
+  are evidence pointers for a human assessor, not a compliance verdict. A technique being
+  listed means the data would help an adversary perform it, not that anyone has.
 - It reads ACLs, but it does not expand Active Directory groups: a custom group granted
   Read is reported as that group, not as the 300 people in it. Nor does it know who actually
   opened a file — that is an audit log question.

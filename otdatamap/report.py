@@ -7,7 +7,7 @@ import json
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from .classify import Catalogue
 from .discover import DataObject
@@ -98,6 +98,9 @@ def explain(obj, catalogue, rules=None) -> str:
                                                for s in obj.signals))
     else:
         out.append("  signals    none")
+    if obj.attack:
+        out.append("  enables    " + ", ".join(f"{t['id']} {t['name']}"
+                                               for t in obj.attack))
     out.append(f"  risk       {obj.risk} -> {obj.severity}")
     for f in obj.findings:
         out.append(f"    [{f['severity']}] {f['id']}: {f['detail']}")
@@ -146,8 +149,36 @@ def build_summary(objects: List[DataObject], catalogue: Catalogue,
     }
 
 
+def _attack_section(attack_summary: Optional[dict]) -> str:
+    if not attack_summary or not attack_summary.get("techniques"):
+        return ""
+    by_id = {t["id"]: t for t in attack_summary["techniques"]}
+    rows = []
+    for tactic in attack_summary["tactics"]:
+        if not tactic["techniques"]:
+            continue
+        first = True
+        for tid in tactic["techniques"]:
+            t = by_id[tid]
+            label = (f"{_e(tactic['name'])}<div class='sr'>{_e(tactic['id'])}</div>"
+                     if first else "")
+            rows.append(
+                f"<tr><td>{label}</td><td><code>{_e(t['id'])}</code></td>"
+                f"<td>{_e(t['name'])}</td><td class='num'>{t['objects']}</td>"
+                f"<td class='sr'>{_e(', '.join(t['because']))}</td></tr>")
+            first = False
+    return ("<h2>ATT&amp;CK for ICS: what this exposure enables</h2>"
+            "<p class='note'>A technique is listed when exposed data pays for it &mdash; "
+            "either the exposure itself (a cleartext password buys Valid Accounts) or the "
+            "content once an adversary holds it (an SCD buys network enumeration). Data "
+            "sitting correctly inside its zone is not counted.</p>"
+            "<table><tr><th>Tactic</th><th>Technique</th><th></th>"
+            "<th class='num'>Objects</th><th>Why</th></tr>"
+            + "".join(rows) + "</table>")
+
+
 def to_html(objects: List[DataObject], catalogue: Catalogue, rules, model: SiteModel,
-            root: Path, top: int = 100) -> str:
+            root: Path, top: int = 100, attack_summary: Optional[dict] = None) -> str:
     s = build_summary(objects, catalogue, model, root)
     ranked = sorted(objects, key=lambda o: (-o.risk, o.rel))
     flagged = [o for o in ranked if o.findings]
@@ -253,6 +284,7 @@ OTDataMap reads files only; it never connects to a device.</div>
 <h2>Sensitivity</h2>{sens_bars}
 {zones_table}
 <h2>Findings</h2>{findings_table}
+{_attack_section(attack_summary)}
 <h2>Flagged objects <span class="sr">(top {top} by risk)</span></h2>{objects_table}
 <footer>Risk score = class sensitivity and impact (max 45) + exposure signals (max 55).
 The IEC 62443-3-3 and MITRE ATT&amp;CK for ICS references are evidence pointers for an
@@ -261,10 +293,11 @@ assessor, not a compliance verdict.</footer>
 
 
 def to_json(objects: List[DataObject], catalogue: Catalogue, model: SiteModel,
-            root: Path) -> str:
+            root: Path, attack_summary: Optional[dict] = None) -> str:
     payload = {
         "tool": "otdatamap",
         "summary": build_summary(objects, catalogue, model, root),
+        "attack": attack_summary or {},
         "objects": [
             {
                 "path": o.rel,
@@ -275,6 +308,7 @@ def to_json(objects: List[DataObject], catalogue: Catalogue, model: SiteModel,
                 "class_reason": o.class_reason,
                 "confidence": o.confidence,
                 "devices": o.devices,
+                "attack": o.attack,
                 "acl": {"source": o.acl.source,
                         "broad": [e.principal for e in o.acl.broad_readers()
                                   + o.acl.broad_writers()]},

@@ -1,0 +1,650 @@
+# OTDataMap - study material.
+#
+# Two tracks, because the gap runs both ways:
+#   track: it  -> OT explained for people who know IT security
+#   track: ot  -> IT security explained for people who know the plant
+#
+# Lessons about a data class use the same class ids as the classifier, so a
+# lesson can be attached to a real file the tool just scanned. The attacker
+# section is NOT written here: it is generated from attack_ics.yaml, so the
+# teaching and the engine can never drift apart.
+#
+# Contributions welcome: a lesson that is wrong for your plant is a bug.
+
+version: 1
+
+glossary:
+  IED: >-
+    Intelligent Electronic Device. A microprocessor relay or controller in a
+    substation: it measures current and voltage, decides when to trip a breaker,
+    and talks IEC 61850 or IEC 104 to the station level.
+  PLC: >-
+    Programmable Logic Controller. The industrial computer that runs the control
+    logic: reads inputs, executes a scan cycle, writes outputs. Deterministic,
+    often running for years without a restart.
+  RTU: >-
+    Remote Terminal Unit. Like a PLC but built for remote sites and telemetry,
+    typically reporting to a SCADA master over a wide-area link.
+  DCS: >-
+    Distributed Control System. The integrated control platform of a process
+    plant (refinery, chemical, power block), where controllers, HMI and
+    engineering are one vendor product rather than assembled parts.
+  SCADA: >-
+    Supervisory Control and Data Acquisition. The layer that collects data from
+    field devices and gives operators a view and a way to issue commands.
+  HMI: >-
+    Human Machine Interface. The operator's screens. What it displays IS the
+    plant, as far as the operator is concerned - which is why manipulating the
+    view is its own attack technique.
+  EWS: >-
+    Engineering Workstation. The machine with the vendor programming software,
+    the project files and usually the credentials. The highest-value Windows
+    host in most plants.
+  Historian: >-
+    A time-series database of process values (tags) sampled over years. The
+    baseline of what normal looks like, and the usual bridge between the OT
+    network and corporate reporting.
+  GOOSE: >-
+    Generic Object Oriented Substation Event. An IEC 61850 multicast message on
+    the station LAN, used for trip and interlock signals. No IP, no TCP, no
+    authentication by default, millisecond deadlines.
+  SV: >-
+    Sampled Values. IEC 61850 streaming of digitised current and voltage
+    measurements, typically 4000 or 4800 samples per second per stream.
+  APPID: >-
+    The application identifier in a GOOSE or SV frame. Subscribers use it, with
+    the destination MAC, to decide which stream is theirs - so it is also what a
+    spoofed publisher must get right.
+  confRev: >-
+    Configuration revision of an IEC 61850 control block. If the DataSet changes
+    and confRev does not, subscribers may map the wrong signals to the wrong
+    inputs and nobody is warned.
+  SCD: >-
+    Substation Configuration Description. The single XML file describing a whole
+    substation: every IED, its address, its logical nodes, and every GOOSE/SV
+    control block. ICD, CID, IID and SSD are its relatives at other stages.
+  COMTRADE: >-
+    IEEE C37.111 common format for transient data exchange - the waveform
+    recording a protection relay writes when it trips, as a .cfg header plus a
+    .dat sample file.
+  Purdue: >-
+    The Purdue reference model, levels 0 (sensors) to 5 (enterprise), used to
+    talk about where a system sits between the process and the business.
+  Zone: >-
+    IEC 62443 grouping of assets with a common security requirement. A conduit
+    is the controlled communication path between two zones.
+  SL-T: >-
+    Target Security Level (1-4) assigned to a zone in IEC 62443-3-2: how
+    capable an attacker the zone is meant to withstand.
+  SIS: >-
+    Safety Instrumented System. The independent system that brings the process
+    to a safe state. Separate from control by design, and the last line before
+    people get hurt.
+  Tag: >-
+    A named process variable (UNIT1.FEEDER2.MW). Tag lists are how an attacker
+    learns what each number means without watching the plant for a month.
+  Bay: >-
+    A functional slice of a substation - one line, one transformer, one
+    busbar section - with its own protection and control equipment.
+
+lessons:
+
+  # ----------------------------------------------------- concepts, IT -> OT
+  - id: priorities
+    track: it
+    title: Why availability and safety outrank confidentiality
+    what: >-
+      In IT you are taught CIA: confidentiality, integrity, availability, in
+      that order of instinct. In OT the order inverts. A leaked document is a
+      bad day; a controller that stops answering can trip a unit, and a
+      controller that answers wrongly can hurt someone.
+    bridge: >-
+      The analogy that breaks: in IT, "patch it now" is responsible. In OT the
+      same instinct can be the incident. A scan that is routine on a server
+      network can knock a 1990s controller off its scan cycle, and a reboot you
+      would schedule for Tuesday night may need a production outage agreed
+      months ahead.
+    why: >-
+      This is why OTDataMap weights safety and availability impact above
+      confidentiality when it scores a data class, and why a PLC program ranks
+      above a historian export even though the historian holds more rows.
+    check:
+      - Ask what happens if this system stops, not just if it leaks.
+      - Ask who has to be physically present to recover it.
+      - Ask when the next window to change anything actually is.
+    read:
+      - NIST SP 800-82r3, Guide to OT Security - https://csrc.nist.gov/pubs/sp/800/82/r3/final
+
+  - id: purdue
+    track: it
+    title: The Purdue model, and what it really means on site
+    what: >-
+      Level 0 is sensors and actuators, level 1 controllers, level 2 supervisory
+      (HMI, EWS), level 3 site operations (historian, reporting), level 3.5 the
+      IT/OT DMZ, levels 4-5 the business.
+    bridge: >-
+      Treat it as a language for talking about exposure, not a diagram of
+      reality. Almost every real plant has at least one path that skips levels:
+      a vendor laptop, a 4G router someone added for remote support, a historian
+      with one foot in each network.
+    why: >-
+      Data respects levels even less than networks do. An SCD file belongs at
+      level 2, but copies of it live in email, on the DMZ share and on a
+      contractor's drive - which is the whole reason this tool exists.
+    check:
+      - For each sensitive folder, which level does it belong to?
+      - Which paths let data move down the model rather than up?
+      - Who outside the plant holds a copy, and who approved that?
+    read:
+      - IEC 62443-3-2, security risk assessment for system design - https://www.isa.org/standards-and-publications/isa-standards
+
+  - id: zones-and-conduits
+    track: it
+    title: Zones and conduits, the IEC 62443 way to argue about it
+    what: >-
+      A zone is a group of assets that share a security requirement. A conduit
+      is the controlled path between zones. Each zone gets a target security
+      level (SL-T) from 1 to 4.
+    bridge: >-
+      The IT equivalent is network segmentation, but zones are defined by
+      consequence, not by subnet. Two devices on the same VLAN can belong to
+      different zones, and saying so out loud is often the most useful hour of
+      an assessment.
+    why: >-
+      OTDataMap's site model is this idea applied to folders: a zone declares
+      the maximum data class it may hold and who owns it, so a restricted file
+      in an internal zone becomes a finding with a name and an owner instead of
+      a shrug.
+    check:
+      - Does every folder holding OT data belong to a declared zone?
+      - Does every zone have a named human owner?
+      - What is the conduit for data leaving the control zone, and is it the one people actually use?
+    read:
+      - IEC 62443-3-2 - https://www.isa.org/standards-and-publications/isa-standards
+
+  - id: protocols
+    track: it
+    title: OT protocols and the authentication that is not there
+    what: >-
+      Modbus, DNP3, IEC 60870-5-104, IEC 61850 GOOSE/MMS, EtherNet/IP, PROFINET,
+      S7comm, BACnet, OPC UA. Most were designed for a trusted wire, and in
+      their common deployments a valid command is a command, whoever sent it.
+    bridge: >-
+      There is no equivalent of a session token. Unless IEC 62351 or OPC UA
+      security is deployed and actually enabled, authentication means "you can
+      reach the port". Detection therefore leans on who is talking and what they
+      are asking for, not on failed logins.
+    why: >-
+      That is why a packet capture of the plant is a sensitive document: it
+      hands over addresses, point meanings and valid message formats - most of
+      the work of issuing a credible command.
+    check:
+      - Which OT protocols are reachable from outside the control zone?
+      - Do you keep captures, and where do they end up after the project ends?
+      - Is IEC 62351 or OPC UA security actually turned on, or just available?
+    read:
+      - MITRE ATT&CK for ICS - https://attack.mitre.org/matrices/ics/
+
+  - id: change-windows
+    track: it
+    title: Why nothing gets fixed this afternoon
+    what: >-
+      Changes in OT are tied to outage windows, vendor approval, validation
+      after the change, and sometimes regulatory notification.
+    bridge: >-
+      The IT reflex - just push the fix - does not survive contact with a
+      system where the rollback is a crew on site at 03:00. But data hygiene is
+      the exception that proves useful: moving a file out of a vendor share,
+      removing a password from a config, deleting a stale copy, none of that
+      touches a controller.
+    why: >-
+      It is why a data-level finding is worth raising. Of everything in an OT
+      assessment, this is the part that can be fixed before the next window.
+    check:
+      - Which findings here can be fixed without touching a live system?
+      - Which need an outage, and when is the next one?
+      - Who signs off a change to a file share versus to a controller?
+    read:
+      - NIST SP 800-82r3 - https://csrc.nist.gov/pubs/sp/800/82/r3/final
+
+  # ----------------------------------------------------- concepts, OT -> IT
+  - id: access-control
+    track: ot
+    title: What an ACL actually says, and why "it is in a folder" is not a control
+    what: >-
+      An access control list names who may read, write or change permissions on
+      a file or folder. Entries like Everyone, Authenticated Users or Domain
+      Users mean every account in the plant, including the contractor's.
+    bridge: >-
+      The plant equivalent is a key cabinet. A locked room with a key hanging
+      next to the door is the state most file shares are in: the folder is
+      "controlled", and the ACL says anyone may enter.
+    why: >-
+      This is why OTDataMap reads the real ACL instead of guessing from folder
+      names. "The vendor folder" is a convention; "Everyone:(RX)" is a fact you
+      can put in a report.
+    check:
+      - Who appears on the ACL of the folder holding your project files?
+      - Is any broad group there, and did anyone decide that or did it inherit?
+      - When a contractor leaves, what actually changes?
+    read:
+      - IEC 62443-3-3 SR 1.1 and SR 2.1 - https://www.isa.org/standards-and-publications/isa-standards
+
+  - id: classification
+    track: ot
+    title: Data classification without the paperwork
+    what: >-
+      Classification means deciding, once, how sensitive a kind of information
+      is, so that everyone handling it afterwards knows the rules without asking.
+    bridge: >-
+      You already do this physically: the protection settings live in a locked
+      panel, the manual lives on a shelf. Classification writes that instinct
+      down so it survives a folder copy.
+    why: >-
+      A catalogue only earns its keep if it reflects your plant. The one shipped
+      here is a starting point, not an authority - overriding it with
+      --classes is the expected move, not a workaround.
+    check:
+      - Which three kinds of file would hurt most if a stranger had them?
+      - Are they treated differently today, or stored beside the manuals?
+      - Who decides, when a new kind of file appears?
+    read:
+      - IEC 62443-3-3 SR 4.1 - https://www.isa.org/standards-and-publications/isa-standards
+
+  - id: credential-hygiene
+    track: ot
+    title: Why a password in a config file is worse than a weak password
+    what: >-
+      Configuration files, scripts and project archives routinely contain
+      cleartext passwords, SNMP community strings or private keys.
+    bridge: >-
+      A weak password is a lock that can be picked. A password in a file on a
+      share is the key taped to the door, and copied every time someone copies
+      the folder - including into the backup, the handover zip and the email.
+    why: >-
+      Rotation is the part people skip. Removing the secret from the file does
+      nothing if the same secret is still valid on the device, because every old
+      copy still works.
+    check:
+      - Search your own config backups for "password" and see what comes back.
+      - If a secret was exposed, who can rotate it, and does that need an outage?
+      - Do any shared accounts exist that cannot be rotated without stopping production?
+    read:
+      - MITRE ATT&CK for ICS T0859 Valid Accounts - https://attack.mitre.org/techniques/T0859/
+
+  - id: evidence
+    track: ot
+    title: Logs, hashes and what makes evidence hold up
+    what: >-
+      A SHA-256 hash is a fingerprint of a file's contents: same bytes, same
+      hash; one bit different, completely different hash.
+    bridge: >-
+      It is the seal on a calibration certificate. You are not trusting the
+      paper, you are trusting that tampering would be visible.
+    why: >-
+      OTDataMap records a hash per object, which is what lets it tell you that
+      the SCD on the vendor share is byte-for-byte the one in engineering - or
+      that it is not. After an incident, that difference is the investigation.
+    check:
+      - Do you have a known-good hash of your current controller projects?
+      - Could you prove which version of a config was running last month?
+      - Where are the logs of who opened the engineering share, and for how long are they kept?
+    read:
+      - IEC 62443-3-3 SR 3.4 and SR 6.1 - https://www.isa.org/standards-and-publications/isa-standards
+
+  # ------------------------------------------------- one lesson per data class
+  - id: substation-config
+    data_class: substation-config
+    track: both
+    title: IEC 61850 substation configuration (SCD, ICD, CID, SSD)
+    what: >-
+      One XML file describing a whole substation: every IED with its vendor,
+      model and IP, every logical device and node, and every GOOSE and SV
+      control block with its APPID, destination MAC, VLAN and DataSet.
+    bridge: >-
+      The closest IT analogy is a network diagram merged with the running
+      configuration of every device and the firewall rule base - in one file,
+      unsigned, that routinely travels by email. Unlike a diagram it is
+      authoritative: the IEDs were configured from it.
+    why: >-
+      It is the engineering truth of the substation. Reading it tells you what
+      trips what. Altering it, if the change is loaded, changes what trips what.
+      A DataSet edited without incrementing confRev silently remaps signals.
+    check:
+      - Are two IEDs sharing an IP, an APPID or a destination MAC?
+      - Is GOOSE running untagged, with no VLAN separating it from everything else?
+      - Does the version in the vendor folder differ from the one in engineering?
+    terms: [SCD, IED, GOOSE, SV, APPID, confRev, Bay]
+    read:
+      - IEC 61850 overview - https://www.iec.ch/
+      - IEC 62351-6, security for 61850 profiles - https://www.iec.ch/
+
+  - id: plc-program
+    data_class: plc-program
+    track: both
+    title: PLC and controller programs (L5X, TIA, XEF, CODESYS)
+    what: >-
+      The control logic itself - tasks, routines, tags, I/O modules and their
+      addresses - exported from or archived by the vendor engineering tool.
+    bridge: >-
+      Source code, except that the build artifact is a running physical process
+      and there is usually no version control, no code review and no signature
+      on what gets downloaded to the controller.
+    why: >-
+      Holding the program removes the need to upload it from the controller,
+      which is noisy. It is also what gets edited before a modified version is
+      downloaded back - the step between access and consequence.
+    check:
+      - Are tags named like credentials (SCADA_Password) sitting in the program?
+      - Is source protection or a controller key switch actually in use?
+      - Does anyone compare the archived program with what is running, and how often?
+    terms: [PLC, EWS, Tag]
+    read:
+      - MITRE ATT&CK for ICS T0843 Program Download - https://attack.mitre.org/techniques/T0843/
+
+  - id: hmi-project
+    data_class: hmi-project
+    track: both
+    title: HMI and SCADA projects
+    what: >-
+      Screens, tag bindings, alarm configuration and often the user accounts of
+      the operator interface.
+    bridge: >-
+      A front-end application bundled with its own user database and its
+      monitoring rules. The difference is that the display is the operator's
+      only sense: if it lies convincingly, the plant is still wrong but nobody
+      is looking.
+    why: >-
+      An HMI project tells an attacker which tags matter and which alarms would
+      fire - the two things needed to make a manipulation quiet.
+    check:
+      - Are operator accounts stored in the project file, and are they shared?
+      - Which alarms would catch the change you are most worried about?
+      - Who can copy the project off the HMI, and is that logged?
+    terms: [HMI, SCADA, Tag]
+    read:
+      - MITRE ATT&CK for ICS T0832 Manipulation of View - https://attack.mitre.org/techniques/T0832/
+
+  - id: network-device-config
+    data_class: network-device-config
+    track: both
+    title: Switch, router and firewall configurations
+    what: >-
+      Running or startup configurations of the network devices carrying the
+      process: interfaces, VLANs, routes, ACLs, SNMP, management access - and
+      very often credentials in the same file.
+    bridge: >-
+      Here IT instincts transfer almost unchanged. The twist is the hardware:
+      ruggedised switches in substations run for a decade, and the config
+      backup is frequently the only documentation of how the plant is wired.
+    why: >-
+      It describes the conduit and hands over the keys at the same time. Type 7
+      passwords are obfuscation, not encryption, and SNMP community strings are
+      cleartext by definition.
+    check:
+      - Telnet, HTTP or SNMPv2 management still enabled?
+      - Is management access restricted to a named network, or reachable from the process VLAN?
+      - Do the config backups live anywhere a contractor can read them?
+    terms: [Zone]
+    read:
+      - IEC 62443-3-3 SR 1.5 - https://www.isa.org/standards-and-publications/isa-standards
+
+  - id: credential-store
+    data_class: credential-store
+    track: both
+    title: Keys, certificates and password files
+    what: >-
+      Private keys, PKCS#12 bundles, SSH keys, password managers, and the
+      "passwords.xlsx" that every site denies having.
+    bridge: >-
+      Identical to IT, except rotation is harder: a shared account may be
+      embedded in a controller, an HMI and a vendor's remote access, and
+      changing it can require a window.
+    why: >-
+      This is the shortest path from reading a file to issuing a command.
+    check:
+      - Where are the engineering and vendor credentials actually kept?
+      - Which of them could be rotated this week without an outage?
+      - Does a key file sit next to the project it unlocks?
+    terms: [EWS]
+    read:
+      - MITRE ATT&CK for ICS T1694 Insecure Credentials - https://attack.mitre.org/techniques/T1694/
+
+  - id: system-backup
+    data_class: system-backup
+    track: both
+    title: System and server backup images
+    what: >-
+      Full images of engineering workstations, HMI servers, historians - the
+      Windows side of the plant.
+    bridge: >-
+      A backup is a complete copy of a system with none of its monitoring. In
+      OT it is also often the only recovery path, because reinstalling means
+      finding a licence, a vendor and a version that still exists.
+    why: >-
+      Two risks in one object: everything inside it is readable offline, and if
+      it is stale it is not a recovery point at all - you find that out on the
+      day you need it.
+    check:
+      - When was the last restore actually tested, not just the last backup taken?
+      - Is the backup store reachable from the same network as what it backs up?
+      - Does it contain credential material, and who can read it?
+    terms: [EWS, Historian]
+    read:
+      - IEC 62443-3-3 SR 7.3 and SR 7.4 - https://www.isa.org/standards-and-publications/isa-standards
+
+  - id: process-capture
+    data_class: process-capture
+    track: both
+    title: Packet captures of the process network
+    what: >-
+      PCAP files from troubleshooting, commissioning or monitoring, holding
+      GOOSE, SV, Modbus, IEC 104, S7comm and whatever else runs on the wire.
+    bridge: >-
+      In IT a capture is debugging material. In OT it is a transcript of an
+      unauthenticated control protocol: addresses, point meanings, timing and
+      valid message formats, all in one file.
+    why: >-
+      It is sniffing that has already been done. Everything an attacker would
+      need days on the network to learn is in a file somebody emailed.
+    check:
+      - Where do commissioning captures end up when the project closes?
+      - Do any captures contain control commands rather than just polling?
+      - Is there a retention rule for them at all?
+    terms: [GOOSE, SV, Tag]
+    read:
+      - MITRE ATT&CK for ICS T0842 Network Sniffing - https://attack.mitre.org/techniques/T0842/
+
+  - id: historian-export
+    data_class: historian-export
+    track: both
+    title: Historian and process data exports
+    what: >-
+      Time-series values for named tags, exported to CSV for reporting,
+      analysis or a dashboard someone built once.
+    bridge: >-
+      A database extract, with the same sprawl problem - and a second life as
+      business data, which is why it is the most common thing to cross the
+      IT/OT boundary legitimately.
+    why: >-
+      It is the baseline of normal. An attacker who knows normal can stay inside
+      it. It can also be commercially sensitive on its own: production volumes
+      are a business fact, not just an engineering one.
+    check:
+      - Which exports leave the OT network, to whom, and on what schedule?
+      - Does the tag naming reveal the plant layout to anyone who reads a column header?
+      - How long are old exports kept on the share?
+    terms: [Historian, Tag]
+    read:
+      - MITRE ATT&CK for ICS T0811 Data from Information Repositories - https://attack.mitre.org/techniques/T0811/
+
+  - id: disturbance-record
+    data_class: disturbance-record
+    track: both
+    title: Disturbance and fault records (COMTRADE)
+    what: >-
+      What a protection relay writes when it operates: a .cfg header naming the
+      station, the device and each analog and digital channel with its CT/VT
+      ratios, plus a .dat file of samples.
+    bridge: >-
+      The nearest analogy is a flight data recorder dump. There is no IT
+      equivalent that combines "evidence of an event" with "specification of the
+      measuring system" in one pair of files.
+    why: >-
+      Individually it is an engineering record. In bulk, the headers are a tour
+      of the protection scheme: which channels exist, at what ratios, on which
+      devices.
+    check:
+      - Are records exported automatically to a share, and does that share have an owner?
+      - Do the headers name the station in a way you would mind seeing published?
+      - Is there a retention period, or do they accumulate forever?
+    terms: [COMTRADE, IED, Bay]
+    read:
+      - IEEE C37.111 (COMTRADE) - https://standards.ieee.org/
+
+  - id: engineering-drawing
+    data_class: engineering-drawing
+    track: both
+    title: Single line diagrams and engineering drawings
+    what: >-
+      The electrical and process drawings: what is connected to what, which
+      breaker feeds which busbar, where the interlocks are.
+    bridge: >-
+      An architecture diagram, but for a physical system where the consequence
+      of a wrong action is measured in equipment damage rather than downtime.
+    why: >-
+      Drawings are what turn access into targeting. They answer "which breaker
+      matters", which is the difference between a nuisance and damage.
+    check:
+      - Are drawings on a share that contractors can browse?
+      - Are superseded revisions still there, and are they marked as superseded?
+      - Does the file name alone give away the site?
+    terms: [Bay]
+    read:
+      - MITRE ATT&CK for ICS T0879 Damage to Property - https://attack.mitre.org/techniques/T0879/
+
+  - id: asset-register
+    data_class: asset-register
+    track: both
+    title: Asset registers and IP plans
+    what: >-
+      The spreadsheet listing devices, vendors, models, firmware versions and
+      addresses. Usually maintained by one person and copied by everyone.
+    bridge: >-
+      A CMDB export. The difference is that in OT it is often more accurate than
+      any scan, because scanning the process network is itself a risk.
+    why: >-
+      It is the discovery phase, handed over. Vendor plus model plus firmware
+      version is also the input to a vulnerability lookup - the same lookup your
+      own team does.
+    check:
+      - How many copies of the asset list exist, and which is authoritative?
+      - Does it include firmware versions, and who else holds it?
+      - Would you be comfortable if this file were public?
+    terms: [IED, PLC, RTU]
+    read:
+      - MITRE ATT&CK for ICS T0846 Remote System Discovery - https://attack.mitre.org/techniques/T0846/
+
+  - id: personal-data
+    data_class: personal-data
+    track: both
+    title: Rosters, contact lists and contractor records
+    what: >-
+      Shift rosters, staff and contractor lists, phone numbers, sometimes
+      identification numbers.
+    bridge: >-
+      Ordinary privacy-regulated data - but in a plant it is also operational
+      intelligence. A roster says who is on site tonight and who is not.
+    why: >-
+      Names and roles are what make a phishing mail land, and shift patterns
+      tell an attacker when the console is least attended.
+    check:
+      - Is personal data sitting on the same engineering share as the projects?
+      - Is there a retention period, and does anyone apply it?
+      - Which contractors still appear on lists after their contract ended?
+    read:
+      - MITRE ATT&CK for ICS T0865 Spearphishing Attachment - https://attack.mitre.org/techniques/T0865/
+
+  - id: firmware-image
+    data_class: firmware-image
+    track: both
+    title: Device firmware images
+    what: >-
+      Binary firmware for relays, controllers, switches and gateways, usually
+      downloaded from a vendor portal and kept for the next upgrade.
+    bridge: >-
+      A software package, except that the signature check - if there is one -
+      happens on a device with no screen, and the install may be irreversible
+      in the field.
+    why: >-
+      Firmware can be analysed offline at leisure for vulnerabilities and
+      hardcoded credentials, and rebuilt into something the device will accept.
+    check:
+      - Are the images you keep the ones the vendor published? Do you have hashes?
+      - Who can write to the folder holding them?
+      - Is firmware ever installed from a contractor's laptop rather than your store?
+    terms: [IED, PLC]
+    read:
+      - MITRE ATT&CK for ICS T1693 Modify Firmware - https://attack.mitre.org/techniques/T1693/
+
+  - id: device-description
+    data_class: device-description
+    track: both
+    title: Device description files (GSDML, EDS, ESI, GSD)
+    what: >-
+      Vendor-supplied files telling the engineering tool what a device is and
+      what it can do: order number, hardware and software revision, modules.
+    bridge: >-
+      A driver package or a device manifest. Low sensitivity on its own.
+    why: >-
+      In bulk they are an inventory by another name: vendor, product and
+      revision for everything installed, which is the version half of a
+      vulnerability lookup.
+    check:
+      - Do the description files present match the devices you believe you have?
+      - Are revisions here newer or older than what is installed?
+    terms: [PLC]
+    read:
+      - MITRE ATT&CK for ICS T0888 Remote System Information Discovery - https://attack.mitre.org/techniques/T0888/
+
+  - id: log-data
+    data_class: log-data
+    track: both
+    title: Operational logs
+    what: >-
+      Event, alarm and audit logs from HMI, controllers, gateways and the
+      Windows hosts around them.
+    bridge: >-
+      Same role as IT logging, usually with a shorter horizon: many OT devices
+      keep a circular buffer measured in hundreds of events, not gigabytes.
+    why: >-
+      Logs are both the evidence you will want after an incident and a map of
+      what is monitored. Knowing what is logged tells an attacker what not to
+      trigger.
+    check:
+      - How long does a controller keep its event log before overwriting?
+      - Is anything forwarded off the device, and to where?
+      - If something happened last month, could you still prove it?
+    terms: [HMI]
+    read:
+      - IEC 62443-3-3 SR 6.1 - https://www.isa.org/standards-and-publications/isa-standards
+
+  - id: vendor-document
+    data_class: vendor-document
+    track: both
+    title: Vendor manuals and documentation
+    what: >-
+      Manuals, commissioning reports, test records and the PDF pile that comes
+      with every project.
+    bridge: >-
+      Public material, mostly - the manual is usually downloadable. The
+      commissioning report is not.
+    why: >-
+      Manuals carry default credentials and engineering access procedures, and
+      a commissioning report tells an attacker exactly how the site was built
+      and what was left at defaults.
+    check:
+      - Is anything in the pile site-specific rather than generic?
+      - Do the default credentials in the manual still work on your devices?
+    read:
+      - MITRE ATT&CK for ICS T1694.001 Default Credentials - https://attack.mitre.org/techniques/T1694/001/

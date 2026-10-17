@@ -38,6 +38,7 @@ class DataObject:
     owner: str = ""
     acl: AclInfo = field(default_factory=AclInfo)
     devices: List[Dict] = field(default_factory=list)
+    attack: List[Dict] = field(default_factory=list)
     signals: List[Dict] = field(default_factory=list)
     findings: List[Dict] = field(default_factory=list)
     risk: int = 0

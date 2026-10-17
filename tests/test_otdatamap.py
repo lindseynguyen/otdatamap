@@ -344,3 +344,217 @@ def test_gui_path_compaction():
     long = "vendor/exchange/EXAMPLE_handover_2026.zip!handover/switches/EX-SW-BAY1.cfg"
     out = compact_path(long)
     assert out.startswith(".../") and out.endswith("EX-SW-BAY1.cfg") and len(out) <= 58
+
+
+# -------------------------------------------------------------- ATT&CK for ICS
+@pytest.fixture(scope="module")
+def amap():
+    from otdatamap.attack import AttackMap
+    return AttackMap.load()
+
+
+def test_attack_mapping_has_no_dangling_techniques(amap):
+    assert amap.unknown_references() == []
+    assert len(amap.tactics) == 12
+    assert amap.matrix == "ics-attack"
+
+
+def test_every_finding_rule_has_an_attack_mapping(amap, rules):
+    missing = [fid for fid in rules.findings if fid not in amap.finding_techniques]
+    assert missing == [], f"findings without ATT&CK mapping: {missing}"
+
+
+def test_every_data_class_has_an_attack_entry(amap, catalogue):
+    missing = [c.id for c in catalogue.classes if c.id not in amap.class_enables]
+    assert missing == [], f"classes without ATT&CK mapping: {missing}"
+
+
+def test_technique_tactics_are_known_tactic_ids(amap):
+    known = {t["id"] for t in amap.tactics}
+    for tech in amap.techniques.values():
+        assert tech.tactics, f"{tech.id} has no tactic"
+        assert set(tech.tactics) <= known, f"{tech.id} references an unknown tactic"
+
+
+def test_unexposed_data_enables_nothing(tmp_path, catalogue, rules, amap):
+    (tmp_path / "engineering").mkdir()
+    (tmp_path / "engineering" / "bay.scd").write_text('<SCL xmlns="x"/>')
+    model_file = tmp_path / "m.yaml"
+    model_file.write_text("site: T\nzones:\n  - id: eng\n    max_class: restricted\n"
+                          "    owner: Eng\n    paths: [engineering]\n")
+    objs = _scan(tmp_path, catalogue, rules, SiteModel.load(model_file), acl=False)
+    obj = objs["engineering/bay.scd"]
+    assert obj.findings == []
+    assert amap.for_object(obj) == []
+
+
+def test_exposed_data_enables_class_and_finding_techniques(tmp_path, catalogue,
+                                                           rules, amap):
+    from otdatamap.attack import apply_to_rules
+    apply_to_rules(amap, rules)
+    (tmp_path / "vendor").mkdir()
+    (tmp_path / "vendor" / "bay.scd").write_text(
+        '<SCL xmlns="http://www.iec.ch/61850/2003/SCL"/>')
+    objs = _scan(tmp_path, catalogue, rules)
+    techniques = amap.for_object(objs["vendor/bay.scd"])
+    ids = {t["id"] for t in techniques}
+    assert "T0811" in ids                      # from DATA-RESTRICTED-IN-SHARED
+    assert "T0840" in ids                      # from the substation-config class
+    entry = next(t for t in techniques if t["id"] == "T0840")
+    assert entry["because"] == ["class:substation-config"]
+    assert entry["tactics"] == ["TA0102"]
+
+
+def test_aggregate_and_navigator_layer(tmp_path, catalogue, rules, amap):
+    from otdatamap.attack import aggregate, navigator_layer
+    (tmp_path / "vendor").mkdir()
+    (tmp_path / "vendor" / "sw_running-config.cfg").write_text(
+        "!\nversion 15.2\nhostname X\nenable secret 5 $1$a$b\n")
+    objects = list(_scan(tmp_path, catalogue, rules).values())
+    amap.annotate(objects)
+    summary = aggregate(objects, amap)
+    assert summary["matrix"] == "ics-attack"
+    assert any(t["id"] == "T0859" for t in summary["techniques"])
+    layer = navigator_layer(summary)
+    assert layer["domain"] == "ics-attack"
+    assert layer["versions"]["layer"] == "4.5"
+    assert all(set(t) >= {"techniqueID", "score"} for t in layer["techniques"])
+
+
+def test_apply_to_rules_is_the_single_source_of_truth(amap):
+    from otdatamap.attack import apply_to_rules
+    fresh = RuleSet.load()
+    fresh.findings["DATA-SECRET-CLEARTEXT"]["attack"] = ["T9999"]
+    apply_to_rules(amap, fresh)
+    assert fresh.findings["DATA-SECRET-CLEARTEXT"]["attack"] == \
+        amap.finding_techniques["DATA-SECRET-CLEARTEXT"]
+
+
+def test_cli_attack_and_layer(tmp_path):
+    import json
+    root = Path(__file__).resolve().parents[1]
+    r = subprocess.run([sys.executable, "-m", "otdatamap", "attack",
+                        "--class", "substation-config"],
+                       cwd=root, capture_output=True, text=True, check=False)
+    assert r.returncode == 0, r.stderr
+    assert "T0840" in r.stdout and "Rogue Master" in r.stdout
+
+    site = tmp_path / "site"
+    (site / "vendor").mkdir(parents=True)
+    (site / "vendor" / "bay.scd").write_text('<SCL xmlns="x"/>')
+    layer = tmp_path / "layer.json"
+    r = subprocess.run([sys.executable, "-m", "otdatamap", "scan", str(site), "-q",
+                        "--attack-layer", str(layer)],
+                       cwd=root, capture_output=True, text=True, check=False)
+    assert r.returncode == 0, r.stderr
+    data = json.loads(layer.read_text())
+    assert data["domain"] == "ics-attack" and data["techniques"]
+
+
+# ---------------------------------------------------------------------- learn
+@pytest.fixture(scope="module")
+def syllabus():
+    from otdatamap.learn import Syllabus
+    return Syllabus.load()
+
+
+def test_every_data_class_has_a_lesson(syllabus, catalogue):
+    missing = [c.id for c in catalogue.classes
+               if c.id != "unclassified" and syllabus.for_class(c.id) is None]
+    assert missing == [], f"data classes without a lesson: {missing}"
+
+
+def test_every_term_used_is_in_the_glossary(syllabus):
+    assert syllabus.unknown_terms() == []
+
+
+def test_lessons_have_both_sides(syllabus):
+    thin = [x.id for x in syllabus.lessons if not (x.what and x.bridge and x.why)]
+    assert thin == [], f"lessons missing what/bridge/why: {thin}"
+    no_check = [x.id for x in syllabus.lessons if not x.check]
+    assert no_check == []
+
+
+def test_both_tracks_exist(syllabus):
+    tracks = {x.track for x in syllabus.lessons}
+    assert {"it", "ot", "both"} <= tracks
+    assert len(syllabus.by_track("it")) < len(syllabus.lessons)
+
+
+def test_attacker_section_is_generated_not_written(syllabus, amap):
+    """The lesson YAML must not hand-write techniques; they come from the map."""
+    from otdatamap.learn import attacker_note
+    lesson = syllabus.for_class("substation-config")
+    notes = attacker_note(lesson, amap)
+    assert any("T0840" in n for n in notes)
+    mapped = amap.class_enables["substation-config"]["techniques"]
+    assert len(notes) == len(mapped) + 1  # the why line, then one per technique
+
+
+def test_render_and_index(syllabus, amap):
+    from otdatamap.learn import index, render
+    text = render(syllabus.for_class("plc-program"), syllabus, amap)
+    assert "What it is" in text and "Go and look" in text and "T0845" in text
+    assert "priorities" in index(syllabus, "it")
+
+
+def test_quiz_is_answerable_and_deterministic(syllabus, amap):
+    from otdatamap.learn import build_quiz, quiz_sheet
+    first = build_quiz(syllabus, amap, None, 6, seed=42)
+    second = build_quiz(syllabus, amap, None, 6, seed=42)
+    assert [q["question"] for q in first] == [q["question"] for q in second]
+    assert len(first) == 6
+    for item in first:
+        assert item["answer"] in item["options"]
+        assert len(item["options"]) == 4
+        assert len(set(item["options"])) == 4
+    assert "Answers" in quiz_sheet(first)
+
+
+def test_quiz_runs_without_a_terminal(syllabus, amap):
+    from otdatamap.learn import build_quiz, run_quiz
+    quiz = build_quiz(syllabus, amap, None, 2, seed=1)
+    answers = iter([dict(zip("abcd", quiz[0]["options"]))  # pick the right letter
+                    and next(k for k, v in zip("abcd", quiz[0]["options"])
+                             if v == quiz[0]["answer"]), "q"])
+    lines = []
+    score = run_quiz(quiz, read_input=lambda _p: next(answers), write=lines.append)
+    assert score == 1
+    assert any("correct" in line for line in lines)
+
+
+def test_study_pack_is_self_contained(syllabus, amap, tmp_path):
+    from otdatamap.learn import build_quiz, to_html
+    page = to_html(syllabus, amap, None, build_quiz(syllabus, amap, None, 3, seed=2))
+    assert page.startswith("<!doctype html>")
+    assert "Glossary" in page and "Study questions" in page
+    assert "<script" not in page.lower()
+
+
+def test_cli_learn(tmp_path):
+    root = Path(__file__).resolve().parents[1]
+    r = subprocess.run([sys.executable, "-m", "otdatamap", "learn", "--track", "ot"],
+                       cwd=root, capture_output=True, text=True, check=False)
+    assert r.returncode == 0 and "access-control" in r.stdout
+
+    r = subprocess.run([sys.executable, "-m", "otdatamap", "learn", "substation-config"],
+                       cwd=root, capture_output=True, text=True, check=False)
+    assert r.returncode == 0 and "GOOSE" in r.stdout
+
+    r = subprocess.run([sys.executable, "-m", "otdatamap", "learn", "--glossary", "GOOSE"],
+                       cwd=root, capture_output=True, text=True, check=False)
+    assert r.returncode == 0 and "multicast" in r.stdout
+
+    target = tmp_path / "sw_running-config.cfg"
+    target.write_text("!\nversion 15.2\nhostname X\nenable secret 5 $1$a$b\n")
+    r = subprocess.run([sys.executable, "-m", "otdatamap", "learn", "--file", str(target)],
+                       cwd=root, capture_output=True, text=True, check=False)
+    assert r.returncode == 0
+    assert "Switch, router and firewall configurations" in r.stdout
+    assert "DATA-SECRET-CLEARTEXT" in r.stdout
+
+    pack = tmp_path / "pack.html"
+    r = subprocess.run([sys.executable, "-m", "otdatamap", "learn", "--html", str(pack),
+                        "--quiz", "--seed", "1"],
+                       cwd=root, capture_output=True, text=True, check=False)
+    assert r.returncode == 0 and pack.read_text().startswith("<!doctype html>")

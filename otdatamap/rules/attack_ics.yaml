@@ -1,0 +1,164 @@
+# MITRE ATT&CK for ICS - the subset that data at rest actually enables.
+#
+# The question this file answers is not "which technique is vaguely related"
+# but: if an adversary reads or alters THIS data, which step of an ICS attack
+# does it pay for? Engineering data is reconnaissance that has already been
+# done, and credentials are lateral movement that has already been paid for.
+#
+# Technique IDs follow the current ATT&CK for ICS matrix. Several older IDs
+# were folded into parent techniques (T0812 Default Credentials ->
+# T1694.001, T0857/T0839 firmware -> T1693.001/.002); the new IDs are used.
+#
+# Everything here is editable: override the whole file with --attack.
+
+version: 1
+matrix: ics-attack
+
+tactics:
+  - {id: TA0108, name: Initial Access}
+  - {id: TA0104, name: Execution}
+  - {id: TA0110, name: Persistence}
+  - {id: TA0111, name: Privilege Escalation}
+  - {id: TA0103, name: Evasion}
+  - {id: TA0102, name: Discovery}
+  - {id: TA0109, name: Lateral Movement}
+  - {id: TA0100, name: Collection}
+  - {id: TA0101, name: Command and Control}
+  - {id: TA0107, name: Inhibit Response Function}
+  - {id: TA0106, name: Impair Process Control}
+  - {id: TA0105, name: Impact}
+
+techniques:
+  T0800: {name: Activate Firmware Update Mode, tactics: [TA0107]}
+  T0801: {name: Monitor Process State, tactics: [TA0100]}
+  T0802: {name: Automated Collection, tactics: [TA0100]}
+  T0809: {name: Data Destruction, tactics: [TA0107]}
+  T0811: {name: Data from Information Repositories, tactics: [TA0100]}
+  T0820: {name: Exploitation for Evasion, tactics: [TA0103]}
+  T0821: {name: Modify Controller Tasking, tactics: [TA0104]}
+  T0822: {name: External Remote Services, tactics: [TA0108]}
+  T0828: {name: Loss of Productivity and Revenue, tactics: [TA0105]}
+  T0830: {name: Adversary-in-the-Middle, tactics: [TA0100]}
+  T0832: {name: Manipulation of View, tactics: [TA0105]}
+  T0836: {name: Modify Parameter, tactics: [TA0106]}
+  T0838: {name: Modify Alarm Settings, tactics: [TA0107]}
+  T0840: {name: Network Connection Enumeration, tactics: [TA0102]}
+  T0842: {name: Network Sniffing, tactics: [TA0102]}
+  T0843: {name: Program Download, tactics: [TA0109]}
+  T0845: {name: Program Upload, tactics: [TA0100]}
+  T0846: {name: Remote System Discovery, tactics: [TA0102]}
+  T0847: {name: Replication Through Removable Media, tactics: [TA0108]}
+  T0848: {name: Rogue Master, tactics: [TA0108]}
+  T0849: {name: Masquerading, tactics: [TA0103]}
+  T0859: {name: Valid Accounts, tactics: [TA0110, TA0109]}
+  T0861: {name: Point & Tag Identification, tactics: [TA0100]}
+  T0862: {name: Supply Chain Compromise, tactics: [TA0108]}
+  T0863: {name: User Execution, tactics: [TA0104]}
+  T0864: {name: Transient Cyber Asset, tactics: [TA0108]}
+  T0865: {name: Spearphishing Attachment, tactics: [TA0108]}
+  T0872: {name: Indicator Removal on Host, tactics: [TA0103]}
+  T0873: {name: Project File Infection, tactics: [TA0110]}
+  T0878: {name: Alarm Suppression, tactics: [TA0107]}
+  T0879: {name: Damage to Property, tactics: [TA0105]}
+  T0882: {name: Theft of Operational Information, tactics: [TA0105]}
+  T0886: {name: Remote Services, tactics: [TA0108, TA0109]}
+  T0888: {name: Remote System Information Discovery, tactics: [TA0102]}
+  T0889: {name: Modify Program, tactics: [TA0110]}
+  T0892: {name: Change Credential, tactics: [TA0107]}
+  T0893: {name: Data from Local System, tactics: [TA0100]}
+  T1692: {name: Unauthorized Message, tactics: [TA0103, TA0106]}
+  T1693: {name: Modify Firmware, tactics: [TA0110, TA0107, TA0106]}
+  T1694: {name: Insecure Credentials, tactics: [TA0110, TA0109]}
+  "T1694.001": {name: "Insecure Credentials: Default Credentials",
+                tactics: [TA0110, TA0109]}
+
+# What an adversary gains from each class of data once they hold a copy.
+# "why" is printed by `otdatamap attack`, so the mapping can be argued with.
+class_enables:
+  substation-config:
+    techniques: [T0840, T0846, T0888, T0861, T0836, T1692, T0848, T0882]
+    why: >-
+      An SCD names every IED with its address, and every GOOSE/SV control block
+      with its APPID, destination MAC and DataSet. That is the network map and
+      the publisher identity an attacker would otherwise have to sniff for, and
+      it is what a spoofed publisher needs to be believed.
+  plc-program:
+    techniques: [T0845, T0843, T0889, T0873, T0821, T0861, T0882]
+    why: >-
+      The control logic itself: tags, routines and I/O. Holding it removes the
+      need to upload the program from the controller, and it is what an attacker
+      edits before downloading a modified one back.
+  hmi-project:
+    techniques: [T0832, T0838, T0878, T0861, T0882]
+    why: >-
+      Screens, tags and alarm configuration - what the operator sees, and what
+      must be changed for a manipulation to stay invisible.
+  network-device-config:
+    techniques: [T0840, T0888, T0859, T1694, "T1694.001", T0886]
+    why: >-
+      Interfaces, VLANs, routes and ACLs, usually with credentials or hashes in
+      the same file. It describes the conduit and often hands over the keys.
+  credential-store:
+    techniques: [T0859, T1694, "T1694.001", T0892, T0822]
+    why: Authentication the attacker does not have to break.
+  system-backup:
+    techniques: [T0893, T0811, T0859, T0882]
+    why: >-
+      A backup holds everything the live system holds, including credential
+      material, with none of the live system's monitoring.
+  process-capture:
+    techniques: [T0842, T0861, T0830, T0882]
+    why: >-
+      A capture is sniffing that has already happened: protocols, addresses,
+      point values and the message formats needed to inject a credible one.
+  historian-export:
+    techniques: [T0801, T0802, T0811, T0882]
+    why: >-
+      Process values over time - the baseline an attacker needs to know what
+      "normal" looks like, and to stay inside it.
+  disturbance-record:
+    techniques: [T0801, T0882]
+    why: Channel configuration and real waveforms from the protection system.
+  engineering-drawing:
+    techniques: [T0888, T0879, T0882]
+    why: >-
+      Single line diagrams tell an attacker which breaker matters, which is the
+      difference between disruption and damage.
+  asset-register:
+    techniques: [T0846, T0840, T0888]
+    why: The discovery step, handed over as a spreadsheet.
+  personal-data:
+    techniques: [T0865, T0863]
+    why: >-
+      Names, roles and shift patterns are what makes a phishing mail land, and
+      tell an attacker who is not at the console tonight.
+  firmware-image:
+    techniques: [T1693, T0800, T0862, T0820]
+    why: >-
+      Firmware can be analysed offline for vulnerabilities and rebuilt into an
+      implant that the device will accept.
+  device-description:
+    techniques: [T0888, T0861]
+    why: Vendor, model and firmware revision - the version half of a CVE lookup.
+  log-data:
+    techniques: [T0872, T0888]
+    why: Knowing what is logged tells an attacker what not to trigger.
+  vendor-document:
+    techniques: ["T1694.001", T0888]
+    why: Manuals carry default credentials and engineering access procedures.
+  unclassified:
+    techniques: []
+    why: ""
+
+# What the exposure itself buys, independent of the data class.
+finding_techniques:
+  DATA-SECRET-CLEARTEXT: [T0859, T1694, "T1694.001", T0892, T0822]
+  DATA-RESTRICTED-EGRESS: [T0882, T0847, T0864]
+  DATA-RESTRICTED-IN-SHARED: [T0811, T0893, T0882]
+  DATA-BROAD-ACCESS: [T0811, T0893, T0859]
+  DATA-OUTSIDE-ZONE: [T0811, T0882]
+  DATA-SPRAWL-DUPLICATE: [T0802, T0811]
+  DATA-UNDECLARED-STORE: [T0811, T0849]
+  DATA-RETENTION-EXCEEDED: [T0882]
+  DATA-STALE: [T0809, T0828]
+  DATA-NO-OWNER: [T0811]

@@ -27,6 +27,7 @@ try:
         QAbstractItemView,
         QApplication,
         QCheckBox,
+        QDialog,
         QFileDialog,
         QFrame,
         QHBoxLayout,
@@ -53,8 +54,10 @@ except ImportError as exc:  # pragma: no cover
 from . import __version__
 from .acl import AclReader
 from .archives import expand, is_archive
+from .attack import AttackMap, aggregate, apply_to_rules
 from .classify import Catalogue
 from .discover import DataObject, walk
+from .learn import Syllabus, attacker_note
 from .model import SiteModel
 from .report import build_summary, to_csv, to_html, to_json
 from .risk import RuleSet, assess
@@ -133,6 +136,8 @@ class ScanWorker(QObject):
         try:
             catalogue = Catalogue.load()
             rules = RuleSet.load()
+            amap = AttackMap.load()
+            apply_to_rules(amap, rules)
             model = SiteModel.load(self.model_path) if self.model_path else SiteModel()
             reader = AclReader(enabled=self.use_acl)
 
@@ -157,8 +162,11 @@ class ScanWorker(QObject):
                 return
             self.progress.emit("scoring")
             assess(objects, catalogue, rules, model)
+            amap.annotate(objects)
+            attack_summary = aggregate(objects, amap)
             summary = build_summary(objects, catalogue, model, self.root)
-            self.finished.emit((objects, catalogue, rules, model, summary, reader.backend))
+            self.finished.emit((objects, catalogue, rules, model, summary,
+                                reader.backend, attack_summary))
         except Exception:
             self.failed.emit(traceback.format_exc(limit=3))
 
@@ -299,6 +307,9 @@ class MainWindow(QMainWindow):
         self.rules = None
         self.model = SiteModel()
         self.scan_root: Optional[Path] = None
+        self.attack_summary: Optional[dict] = None
+        self.syllabus = Syllabus.load()
+        self.amap = AttackMap.load()
         self.thread: Optional[QThread] = None
 
         self.table_model = ObjectModel(self.theme)
@@ -391,6 +402,12 @@ class MainWindow(QMainWindow):
         self.search.setPlaceholderText("Filter by path or class")
         self.search.textChanged.connect(self.proxy.set_needle)
         row3.addWidget(self.search, 1)
+        learn_btn = QPushButton("What is this?")
+        learn_btn.setToolTip("Explain the selected file: what this kind of OT data is, "
+                             "how it looks from the other side, and what it buys an "
+                             "adversary")
+        learn_btn.clicked.connect(self._show_lesson)
+        row3.addWidget(learn_btn)
         for text, slot in (("Save HTML", self._save_html), ("CSV", self._save_csv),
                            ("JSON", self._save_json)):
             btn = QPushButton(text)
@@ -415,6 +432,7 @@ class MainWindow(QMainWindow):
             self.table.setColumnWidth(col, width)
         header.setSectionResizeMode(2, QHeaderView.Stretch)
         self.table.selectionModel().selectionChanged.connect(self._show_detail)
+        self.table.doubleClicked.connect(self._show_lesson)
         split.addWidget(self.table)
 
         self.detail = QTextBrowser()
@@ -495,7 +513,8 @@ class MainWindow(QMainWindow):
         QMessageBox.critical(self, "OTDataMap", message)
 
     def _scan_done(self, payload) -> None:
-        objects, catalogue, rules, model, summary, backend = payload
+        objects, catalogue, rules, model, summary, backend, attack_summary = payload
+        self.attack_summary = attack_summary
         self.objects, self.catalogue = objects, catalogue
         self.rules, self.model = rules, model
         self._stop_busy()
@@ -510,15 +529,15 @@ class MainWindow(QMainWindow):
         self.detail.setHtml(self._placeholder())
         inside = sum(1 for o in objects if "!" in o.rel)
         extra = f", {inside} inside archives" if inside else ""
+        techniques = len(attack_summary.get("techniques", []))
+        tactics = len([t for t in attack_summary.get("tactics", []) if t["techniques"]])
         self.statusBar().showMessage(
-            f"{summary['objects']} objects{extra} — access control: {backend}")
+            f"{summary['objects']} objects{extra} — access control: {backend}"
+            f" — enables {techniques} ATT&CK ICS techniques across {tactics} tactics")
 
     # ---------------------------------------------------------------- details
     def _show_detail(self) -> None:
-        rows = self.table.selectionModel().selectedRows()
-        if not rows:
-            return
-        obj = self.table_model.object_at(self.proxy.mapToSource(rows[0]).row())
+        obj = self._selected_object()
         if obj is None:
             return
         t = self.theme
@@ -555,6 +574,12 @@ class MainWindow(QMainWindow):
         if obj.signals:
             rows_html.append(line("Signals",
                                   esc(", ".join(s["label"] for s in obj.signals))))
+        if obj.attack:
+            chips = " ".join(
+                f"<span style='background:{t2['line']};border-radius:9px;"
+                f"padding:1px 7px'>{esc(a['id'])} {esc(a['name'])}</span>"
+                for a in obj.attack for t2 in [t])
+            rows_html.append(line("Enables", chips))
         body = [head, "<table cellspacing='0'>", *rows_html, "</table>"]
 
         if obj.findings:
@@ -574,6 +599,83 @@ class MainWindow(QMainWindow):
             body.append(f"<div style='color:{t['muted']};margin-top:10px'>"
                         "No findings on this object.</div>")
         self.detail.setHtml("".join(body))
+
+    # ------------------------------------------------------------------ learn
+    def _selected_object(self) -> Optional[DataObject]:
+        rows = self.table.selectionModel().selectedRows()
+        if not rows:
+            return None
+        return self.table_model.object_at(self.proxy.mapToSource(rows[0]).row())
+
+    def _lesson_html(self, lesson) -> str:
+        t = self.theme
+
+        def e(x):
+            return str(x).replace("&", "&amp;").replace("<", "&lt;")
+
+        parts = [f"<h2 style='margin:0'>{e(lesson.title)}</h2>",
+                 f"<div style='color:{t['muted']};font-size:11px'>{e(lesson.id)} "
+                 f"&middot; track {e(lesson.track)}</div>"]
+        for label, body in (("What it is", lesson.what),
+                            ("Coming from the other side", lesson.bridge),
+                            ("Why it matters", lesson.why)):
+            if body:
+                parts.append(f"<h3 style='color:{t['muted']};font-size:11px;"
+                             f"text-transform:uppercase;margin:14px 0 2px'>{label}</h3>"
+                             f"<div>{e(body)}</div>")
+        notes = attacker_note(lesson, self.amap)
+        if notes:
+            items = "".join(f"<li>{e(n)}</li>" for n in notes[1:])
+            parts.append(f"<h3 style='color:{t['muted']};font-size:11px;"
+                         f"text-transform:uppercase;margin:14px 0 2px'>What an "
+                         f"adversary gains</h3><div>{e(notes[0])}</div>"
+                         f"<ul>{items}</ul>")
+        if lesson.check:
+            parts.append(f"<h3 style='color:{t['muted']};font-size:11px;"
+                         f"text-transform:uppercase;margin:14px 0 2px'>Go and look"
+                         f"</h3><ul>"
+                         + "".join(f"<li>{e(c)}</li>" for c in lesson.check) + "</ul>")
+        if lesson.terms:
+            rows = "".join(f"<li><b>{e(term)}</b> &mdash; "
+                           f"{e(self.syllabus.glossary.get(term, ''))}</li>"
+                           for term in lesson.terms)
+            parts.append(f"<h3 style='color:{t['muted']};font-size:11px;"
+                         f"text-transform:uppercase;margin:14px 0 2px'>Terms</h3>"
+                         f"<ul>{rows}</ul>")
+        if lesson.read:
+            parts.append(f"<h3 style='color:{t['muted']};font-size:11px;"
+                         f"text-transform:uppercase;margin:14px 0 2px'>Read next</h3>"
+                         f"<ul>" + "".join(f"<li>{e(r)}</li>" for r in lesson.read)
+                         + "</ul>")
+        return "".join(parts)
+
+    def _show_lesson(self) -> None:
+        obj = self._selected_object()
+        if obj is None:
+            QMessageBox.information(self, "OTDataMap",
+                                    "Select a row first, then press What is this?")
+            return
+        lesson = self.syllabus.for_class(obj.class_id)
+        if lesson is None:
+            QMessageBox.information(self, "OTDataMap",
+                                    f"No lesson yet for {obj.class_id}.")
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle(lesson.title)
+        dialog.resize(760, 620)
+        dialog.setStyleSheet(QSS.format(**self.theme))
+        box = QVBoxLayout(dialog)
+        view = QTextBrowser()
+        view.setOpenExternalLinks(False)
+        view.setHtml(self._lesson_html(lesson))
+        box.addWidget(view)
+        close = QPushButton("Close")
+        close.clicked.connect(dialog.accept)
+        bottom = QHBoxLayout()
+        bottom.addStretch(1)
+        bottom.addWidget(close)
+        box.addLayout(bottom)
+        dialog.exec_()
 
     # ------------------------------------------------------------------ saves
     def _ready(self) -> bool:
@@ -600,7 +702,8 @@ class MainWindow(QMainWindow):
             path = self._ask(".html", "HTML report")
             if path:
                 self._write(path, to_html(self.objects, self.catalogue, self.rules,
-                                          self.model, self.scan_root))
+                                          self.model, self.scan_root,
+                                          attack_summary=self.attack_summary))
 
     def _save_csv(self) -> None:
         if self._ready():
@@ -613,7 +716,7 @@ class MainWindow(QMainWindow):
             path = self._ask(".json", "JSON output")
             if path:
                 self._write(path, to_json(self.objects, self.catalogue, self.model,
-                                          self.scan_root))
+                                          self.scan_root, self.attack_summary))
 
 
 def main() -> int:
