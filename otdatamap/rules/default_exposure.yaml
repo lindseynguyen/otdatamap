@@ -1,0 +1,139 @@
+# OTDataMap - exposure signals and finding rules.
+# Exposure signals raise the risk score of a data object; findings are raised
+# when a signal (or combination) is not acceptable for the object's class.
+
+version: 1
+
+# Path patterns are matched case-insensitively against the path relative to the
+# scan root, using / as separator. Tune these to your own naming conventions.
+locations:
+  shared:
+    weight: 3
+    patterns: ['*/share/*', '*/shared/*', '*/public/*', '*/common/*', '*/transfer/*',
+               '*/exchange/*', '*/tmp/*', '*/temp/*', '*/inbox/*', '*/dropbox_local/*']
+    label: Shared or transfer area
+  vendor:
+    weight: 4
+    patterns: ['*/vendor*/*', '*/supplier*/*', '*/contractor*/*', '*/integrator*/*',
+               '*/oem/*', '*/3rd*party*/*', '*/third*party*/*']
+    label: Vendor / contractor area
+  cloud:
+    weight: 4
+    patterns: ['*/onedrive*/*', '*/dropbox/*', '*/google drive/*', '*/googledrive/*',
+               '*/icloud*/*', '*/sharepoint*/*', '*/box sync/*', '*/nextcloud/*', '*/sync/*']
+    label: Cloud-synchronised folder
+  removable:
+    weight: 4
+    patterns: ['*/usb*/*', '*/removable*/*', '*/pendrive*/*', '*/e:/*', '*/f:/*', '*/media/*']
+    label: Removable media
+  personal:
+    weight: 3
+    patterns: ['*/desktop/*', '*/downloads/*', '*/my documents/*', '*/users/*/documents/*']
+    label: Personal workstation folder
+  archive_old:
+    weight: 1
+    patterns: ['*/archive/*', '*/old/*', '*/backup_old/*', '*/_old/*', '*/2019/*', '*/2020/*']
+    label: Archive area
+
+# Regexes applied to the first 256 KB of text-like files.
+secrets:
+  - id: password-assignment
+    pattern: '(?i)(password|passwd|pwd|secret|enable secret)\s*[:=]\s*\S{4,}'
+    label: Cleartext password
+  - id: device-secret
+    pattern: '(?i)^\s*(enable (secret|password)|username \S+ (secret|password)|set admin[-_ ]?password)\s+\d?\s*\S{4,}'
+    label: Device enable / local account secret
+
+  - id: snmp-community
+    pattern: '(?i)snmp(-server)?\s+community\s+(public|private|\S+)'
+    label: SNMP community string
+  - id: private-key
+    pattern: '-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----'
+    label: Private key block
+  - id: cisco-type7
+    pattern: '(?i)password 7 [0-9a-f]{4,}'
+    label: Cisco type 7 password
+  - id: connection-string
+    pattern: '(?i)(Data Source|Server)=.{1,64};.*(Password|Pwd)='
+    label: Database connection string with password
+
+thresholds:
+  stale_days: 540          # DATA-STALE: no change for this long
+  duplicate_locations: 3   # DATA-SPRAWL: same content in N or more folders
+  large_file_mb: 512       # reported, not a finding on its own
+
+severity_bands:            # risk score -> severity
+  critical: 85
+  high: 65
+  medium: 40
+
+findings:
+  - id: DATA-SECRET-CLEARTEXT
+    title: Cleartext credential found in a data object
+    severity: critical
+    sr: [SR 1.5, SR 4.1]
+    attack: [T0812, T0859]
+    remediation: Remove the secret from the file, rotate it, and move the file to a controlled store.
+
+  - id: DATA-RESTRICTED-IN-SHARED
+    title: Restricted data in a shared, vendor or personal area
+    severity: high
+    sr: [SR 2.1, SR 4.1]
+    attack: [T0882]
+    remediation: Move the object into the zone that owns it and grant access per role, not per folder.
+
+  - id: DATA-RESTRICTED-EGRESS
+    title: Restricted data in a cloud-synchronised folder or on removable media
+    severity: critical
+    sr: [SR 5.1, SR 4.1]
+    attack: [T0882, T0867]
+    remediation: Data of this class must not leave the OT zone through an uncontrolled conduit.
+
+  - id: DATA-OUTSIDE-ZONE
+    title: Data object above the maximum class allowed in its zone
+    severity: high
+    sr: [SR 5.1, SR 5.2]
+    attack: [T0882]
+    remediation: Either reclassify the zone and apply the matching controls, or relocate the object.
+
+  - id: DATA-SPRAWL-DUPLICATE
+    title: Identical copies of sensitive data in several locations
+    severity: medium
+    sr: [SR 4.1]
+    attack: [T0882]
+    remediation: Keep one authoritative copy; replace the others with a pointer or delete them.
+
+  - id: DATA-RETENTION-EXCEEDED
+    title: Object kept beyond the retention period of its class
+    severity: medium
+    sr: [SR 4.2]
+    attack: []
+    remediation: Delete or archive to offline storage per the retention rule.
+
+  - id: DATA-STALE
+    title: Engineering or backup data not refreshed
+    severity: medium
+    sr: [SR 7.3, SR 7.4]
+    attack: [T0828]
+    remediation: Confirm the object still matches the installed system; a stale backup is not a recovery point.
+
+  - id: DATA-WORLD-READABLE
+    title: Weak file permissions on a restricted object
+    severity: high
+    sr: [SR 2.1]
+    attack: [T0882]
+    remediation: Restrict the file permissions to the role that owns the data.
+
+  - id: DATA-NO-OWNER
+    title: Sensitive data in a store with no declared owner
+    severity: medium
+    sr: [SR 2.1]
+    attack: []
+    remediation: Name an owner in the site model; unowned data is nobody's problem until it leaks.
+
+  - id: DATA-UNDECLARED-STORE
+    title: Sensitive data in a folder not declared in the site model
+    severity: medium
+    sr: [SR 5.1]
+    attack: [T0882]
+    remediation: Add the store to the model with a zone and an owner, or remove the data from it.

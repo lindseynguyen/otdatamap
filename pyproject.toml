@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "otdatamap"
+version = "0.1.0"
+description = "Read-only data classification, inventory and data-risk analysis for OT/ICS environments"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "MrDuc Nguyen", email = "" }]
+keywords = ["ot", "ics", "scada", "iec62443", "data-classification", "risk", "security"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Information Technology",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Security",
+]
+dependencies = ["PyYAML>=5.4"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "ruff>=0.5"]
+
+[project.urls]
+Homepage = "https://github.com/lindseynguyen/otdatamap"
+Issues = "https://github.com/lindseynguyen/otdatamap/issues"
+
+[project.scripts]
+otdatamap = "otdatamap.cli:main"
+
+[tool.setuptools]
+packages = ["otdatamap"]
+
+[tool.setuptools.package-data]
+otdatamap = ["rules/*.yaml"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "SIM"]

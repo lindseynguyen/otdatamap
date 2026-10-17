@@ -1,0 +1,49 @@
+# OTDataMap site model
+#
+# Describe where OT data is allowed to live. Paths are relative to the folder
+# you scan, and use / as separator. Everything here is optional, but a model
+# turns "this file looks sensitive" into "this file is in the wrong zone".
+
+site: Example Plant
+
+zones:
+  - id: level1-control
+    name: Process control zone (Purdue level 1-2)
+    sl_t: 3
+    max_class: restricted
+    owner: Control Systems Engineering
+    description: Engineering workstations, HMI and controller projects.
+    paths:
+      - engineering
+      - plc
+      - substation_backup
+
+  - id: level3-operations
+    name: Operations zone (Purdue level 3)
+    sl_t: 2
+    max_class: confidential
+    owner: Plant IT
+    description: Historian, reporting and operations file shares.
+    paths:
+      - historian
+      - reports
+
+  - id: dmz
+    name: IT/OT DMZ
+    sl_t: 2
+    max_class: internal
+    owner: Plant IT
+    description: Exchange area with the corporate network. No restricted data.
+    paths:
+      - dmz
+      - transfer
+
+  - id: vendor
+    name: Vendor exchange
+    sl_t: 1
+    max_class: internal
+    owner: Procurement
+    description: Anything a contractor can read or write.
+    paths:
+      - vendor
+      - contractor

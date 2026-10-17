@@ -1,0 +1,177 @@
+# OTDataMap - default data classification catalogue for OT/ICS environments.
+#
+# sensitivity : public | internal | confidential | restricted
+# impact      : what happens if this data is disclosed, altered or lost.
+#               0 = none, 1 = low, 2 = moderate, 3 = high
+#               safety / availability are weighted higher than confidentiality
+#               in OT, which is the opposite of a typical IT catalogue.
+# retention_days : 0 = no limit. Used by DATA-RETENTION-EXCEEDED.
+# match       : ext (lower-case, with dot), name (glob), content (regex, text files only)
+
+version: 1
+
+classes:
+  - id: substation-config
+    title: Substation configuration (IEC 61850)
+    sensitivity: restricted
+    impact: {safety: 3, availability: 3, integrity: 3, confidentiality: 2}
+    retention_days: 0
+    tags: [iec61850, engineering]
+    match:
+      ext: [.scd, .icd, .cid, .iid, .ssd, .sed]
+      content: ['<SCL[\s>]', 'http://www\.iec\.ch/61850']
+
+  - id: plc-program
+    title: PLC / controller program
+    sensitivity: restricted
+    impact: {safety: 3, availability: 3, integrity: 3, confidentiality: 2}
+    retention_days: 0
+    tags: [plc, engineering]
+    match:
+      ext: [.l5x, .l5k, .acd, .ap14, .ap15, .ap16, .ap17, .ap18, .ap19, .zap14, .zap15, .zap16, .zap17, .zap18, .zap19, .s7p, .xef, .stu, .project, .pro, .pou]
+      content: ['<RSLogix5000Content', '<PLCopenProject']
+
+  - id: hmi-project
+    title: HMI / SCADA project
+    sensitivity: restricted
+    impact: {safety: 2, availability: 3, integrity: 3, confidentiality: 2}
+    retention_days: 0
+    tags: [hmi, scada, engineering]
+    match:
+      ext: [.mer, .apa, .fwx, .pvc, .wcc, .rsv]
+      name: ['*wincc*', '*factorytalk*', '*intouch*', '*ignition*backup*', '*.gbck']
+
+  - id: network-device-config
+    title: Network / security device configuration
+    sensitivity: restricted
+    impact: {safety: 1, availability: 3, integrity: 3, confidentiality: 3}
+    retention_days: 0
+    tags: [network, hardening]
+    match:
+      ext: [.cfg, .conf, .startup, .running]
+      name: ['*running-config*', '*startup-config*', '*_config.txt', '*fortigate*.conf', '*ruggedcom*']
+      content: ['^!\s*\n?version \d', 'config system global', '^hostname \S+']
+
+  - id: credential-store
+    title: Credentials, keys and certificates
+    sensitivity: restricted
+    impact: {safety: 2, availability: 2, integrity: 3, confidentiality: 3}
+    retention_days: 0
+    tags: [secrets]
+    match:
+      ext: [.kdbx, .pem, .key, .pfx, .p12, .jks, .ppk]
+      name: ['id_rsa*', '*password*', '*passwd*', '*credential*', '*.htpasswd', '*secrets*']
+
+  - id: system-backup
+    title: System / server backup image
+    sensitivity: restricted
+    impact: {safety: 1, availability: 3, integrity: 3, confidentiality: 3}
+    retention_days: 1095
+    tags: [backup, recovery]
+    match:
+      ext: [.bak, .vhd, .vhdx, .vmdk, .img, .iso, .gho, .tib, .wim]
+      name: ['*backup*.zip', '*backup*.tar.gz', '*_full_*.7z']
+
+  - id: process-capture
+    title: Process network capture
+    sensitivity: confidential
+    impact: {safety: 1, availability: 1, integrity: 1, confidentiality: 3}
+    retention_days: 365
+    tags: [network, forensics]
+    match:
+      ext: [.pcap, .pcapng, .cap]
+
+  - id: historian-export
+    title: Historian / process data export
+    sensitivity: confidential
+    impact: {safety: 0, availability: 1, integrity: 2, confidentiality: 3}
+    retention_days: 730
+    tags: [process-data]
+    match:
+      ext: [.csv, .tsv]
+      content: ['(?i)^\s*(timestamp|time|datetime)\s*[,;\t].*(tag|value|quality|pv|sp)',
+                '(?i)tagname\s*[,;\t]']
+
+  - id: disturbance-record
+    title: Disturbance / fault record
+    sensitivity: internal
+    impact: {safety: 0, availability: 1, integrity: 2, confidentiality: 1}
+    retention_days: 1825
+    tags: [comtrade, protection]
+    match:
+      ext: [.cfg, .dat, .hdr, .inf]
+      content: ['^\s*\S+,\s*\S+,\s*(1991|1999|2013)\s*$']
+
+  - id: engineering-drawing
+    title: Engineering drawing / single line diagram
+    sensitivity: confidential
+    impact: {safety: 2, availability: 1, integrity: 2, confidentiality: 3}
+    retention_days: 0
+    tags: [documentation]
+    match:
+      ext: [.dwg, .dxf, .dgn, .vsd, .vsdx]
+      name: ['*single*line*.pdf', '*sld*.pdf', '*one*line*.pdf', '*topology*.pdf', '*schematic*.pdf']
+
+  - id: asset-register
+    title: Asset register / inventory list
+    sensitivity: confidential
+    impact: {safety: 0, availability: 1, integrity: 2, confidentiality: 3}
+    retention_days: 0
+    tags: [documentation, inventory]
+    match:
+      name: ['*asset*list*', '*asset*register*', '*inventory*.xlsx', '*inventory*.csv', '*ip*list*', '*ip*plan*']
+
+  - id: personal-data
+    title: Personal data (staff, shift, contractor records)
+    sensitivity: confidential
+    impact: {safety: 0, availability: 0, integrity: 1, confidentiality: 3}
+    retention_days: 1095
+    tags: [privacy]
+    match:
+      name: ['*shift*roster*', '*staff*list*', '*contact*list*', '*personnel*', '*contractor*list*']
+      content: ['(?i)\b(full ?name|ho ten|employee id|national id|passport no)\b.*[,;\t]']
+
+  - id: log-data
+    title: Operational log
+    sensitivity: internal
+    impact: {safety: 0, availability: 1, integrity: 2, confidentiality: 2}
+    retention_days: 365
+    tags: [logging]
+    match:
+      ext: [.log, .evtx, .syslog, .journal]
+      name: ['*event*log*', '*alarm*log*', '*audit*log*']
+
+  - id: firmware-image
+    title: Device firmware image
+    sensitivity: confidential
+    impact: {safety: 2, availability: 2, integrity: 3, confidentiality: 2}
+    retention_days: 0
+    tags: [firmware, supply-chain]
+    match:
+      ext: [.bin, .hex, .srec, .s19, .fw, .upd]
+
+  - id: device-description
+    title: Device description file
+    sensitivity: internal
+    impact: {safety: 0, availability: 1, integrity: 2, confidentiality: 1}
+    retention_days: 0
+    tags: [engineering]
+    match:
+      ext: [.gsdml, .gsd, .eds, .esi, .xdd]
+
+  - id: vendor-document
+    title: Vendor manual / documentation
+    sensitivity: internal
+    impact: {safety: 0, availability: 0, integrity: 1, confidentiality: 1}
+    retention_days: 0
+    tags: [documentation]
+    match:
+      ext: [.pdf, .docx, .doc, .pptx]
+
+  - id: unclassified
+    title: Unclassified file
+    sensitivity: internal
+    impact: {safety: 0, availability: 0, integrity: 1, confidentiality: 1}
+    retention_days: 0
+    tags: []
+    match: {}
