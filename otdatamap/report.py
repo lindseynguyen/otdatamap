@@ -74,6 +74,36 @@ def _e(s) -> str:
     return html.escape(str(s))
 
 
+def _devices(o) -> str:
+    from .otinspect import describe
+    return describe(o.devices)
+
+
+def explain(obj, catalogue, rules=None) -> str:
+    """Plain-text trace of why an object got the score it did."""
+    klass = catalogue.get(obj.class_id) or catalogue.classes[-1]
+    out = [f"{obj.rel}",
+           f"  class      {klass.id} ({klass.title})",
+           f"             matched by {obj.class_reason} -> {obj.confidence} confidence",
+           f"  sensitivity {klass.sensitivity}, impact {klass.impact}"]
+    if obj.devices:
+        out.append(f"  describes  {_devices(obj)}")
+    if obj.zone_id:
+        out.append(f"  zone       {obj.zone_id} (owner {obj.owner or 'unnamed'})")
+    if obj.acl.available:
+        out.append(f"  access     {obj.acl.describe() or 'no broad principal'} "
+                   f"[{obj.acl.source}]")
+    if obj.signals:
+        out.append("  signals    " + ", ".join(f"{s['label']} (+{s['weight']})"
+                                               for s in obj.signals))
+    else:
+        out.append("  signals    none")
+    out.append(f"  risk       {obj.risk} -> {obj.severity}")
+    for f in obj.findings:
+        out.append(f"    [{f['severity']}] {f['id']}: {f['detail']}")
+    return "\n".join(out)
+
+
 def _bars(rows, total) -> str:
     out = []
     for label, count, extra in rows:
@@ -172,7 +202,10 @@ def to_html(objects: List[DataObject], catalogue: Catalogue, rules, model: SiteM
         ids = ", ".join(sorted({f["id"] for f in o.findings}))
         orows.append(
             f'<tr><td class="path">{_e(o.rel)}</td>'
-            f"<td>{_e(klass.title if klass else o.class_id)}</td>"
+            f"<td>{_e(klass.title if klass else o.class_id)}"
+            f'<div class="sr">match: {_e(o.confidence)} confidence'
+            + (f' &middot; {_e(_devices(o))}' if o.devices else "")
+            + '</div></td>'
             f"<td>{_e(o.zone_id or '-')}</td>"
             f"<td>{_e(o.owner or '-')}</td>"
             f'<td><span class="pill {o.severity}">{o.risk}</span></td>'
@@ -240,6 +273,11 @@ def to_json(objects: List[DataObject], catalogue: Catalogue, model: SiteModel,
                 "sha256": o.digest,
                 "class": o.class_id,
                 "class_reason": o.class_reason,
+                "confidence": o.confidence,
+                "devices": o.devices,
+                "acl": {"source": o.acl.source,
+                        "broad": [e.principal for e in o.acl.broad_readers()
+                                  + o.acl.broad_writers()]},
                 "sensitivity": (catalogue.get(o.class_id) or catalogue.classes[-1]).sensitivity,
                 "zone": o.zone_id,
                 "owner": o.owner,
@@ -259,11 +297,14 @@ def to_csv(objects: List[DataObject], catalogue: Catalogue) -> str:
     import io
     buf = io.StringIO()
     w = csv.writer(buf, lineterminator="\n")
-    w.writerow(["path", "class", "sensitivity", "zone", "owner", "size_bytes",
-                "modified", "risk", "severity", "findings", "sha256"])
+    w.writerow(["path", "class", "confidence", "sensitivity", "zone", "owner",
+                "size_bytes", "modified", "risk", "severity", "findings",
+                "devices", "sha256"])
     for o in sorted(objects, key=lambda x: (-x.risk, x.rel)):
         klass = catalogue.get(o.class_id) or catalogue.classes[-1]
-        w.writerow([o.rel, o.class_id, klass.sensitivity, o.zone_id, o.owner, o.size,
+        w.writerow([o.rel, o.class_id, o.confidence, klass.sensitivity,
+                    o.zone_id, o.owner, o.size,
                     o.mtime.isoformat(), o.risk, o.severity,
-                    ";".join(sorted({f["id"] for f in o.findings})), o.digest])
+                    ";".join(sorted({f["id"] for f in o.findings})),
+                    _devices(o), o.digest])
     return buf.getvalue()

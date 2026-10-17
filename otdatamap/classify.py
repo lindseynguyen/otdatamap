@@ -91,7 +91,9 @@ class Catalogue:
                 return c
         return None
 
-    def classify(self, path: Path, head: str = "") -> tuple[DataClass, str]:
+    def classify(self, path: Path, head: str = "") -> "tuple[DataClass, str, str]":
+        """Return (class, reason, confidence). Confidence says how the match was
+        made: a content signature is strong evidence, an extension is a guess."""
         name = path.name.lower()
         ext = path.suffix.lower()
         best: Optional[DataClass] = None
@@ -115,8 +117,9 @@ class Catalogue:
                 best, best_score, best_reason = klass, score, reason
         if best is None:
             fallback = self.get("unclassified") or self.classes[-1]
-            return fallback, "no rule matched"
-        return best, best_reason
+            return fallback, "no rule matched", "none"
+        confidence = {3: "high", 2: "medium", 1: "low"}.get(best_score, "none")
+        return best, best_reason, confidence
 
 
 def is_textual(path: Path) -> bool:

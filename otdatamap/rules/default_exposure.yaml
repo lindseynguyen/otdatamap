@@ -117,12 +117,14 @@ findings:
     attack: [T0828]
     remediation: Confirm the object still matches the installed system; a stale backup is not a recovery point.
 
-  - id: DATA-WORLD-READABLE
-    title: Weak file permissions on a restricted object
+  - id: DATA-BROAD-ACCESS
+    title: Sensitive object readable by a broad principal
     severity: high
-    sr: [SR 2.1]
+    sr: [SR 1.1, SR 2.1]
     attack: [T0882]
-    remediation: Restrict the file permissions to the role that owns the data.
+    remediation: >-
+      Grant access by role. Everyone / Domain Users / world-readable on this
+      class of data means every account on the network holds a copy in waiting.
 
   - id: DATA-NO-OWNER
     title: Sensitive data in a store with no declared owner

@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Iterator, List
 
+from .acl import AclInfo
+
 HEAD_BYTES = 256 * 1024
 FULL_HASH_LIMIT = 64 * 1024 * 1024  # above this, hash head+tail+size instead
 
@@ -30,9 +32,12 @@ class DataObject:
     digest: str = ""
     head: str = ""
     class_id: str = ""
+    confidence: str = "low"
     class_reason: str = ""
     zone_id: str = ""
     owner: str = ""
+    acl: AclInfo = field(default_factory=AclInfo)
+    devices: List[Dict] = field(default_factory=list)
     signals: List[Dict] = field(default_factory=list)
     findings: List[Dict] = field(default_factory=list)
     risk: int = 0

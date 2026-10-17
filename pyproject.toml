@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "otdatamap"
-version = "0.1.0"
+version = "0.3.0"
 description = "Read-only data classification, inventory and data-risk analysis for OT/ICS environments"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -22,6 +22,7 @@ classifiers = [
 dependencies = ["PyYAML>=5.4"]
 
 [project.optional-dependencies]
+gui = ["PyQt5>=5.15"]
 dev = ["pytest>=7", "ruff>=0.5"]
 
 [project.urls]

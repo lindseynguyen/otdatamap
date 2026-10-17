@@ -104,6 +104,16 @@ FILES = {
     "archive/2020/plant_full_backup.bak": "FABRICATED OLD BACKUP\n" * 100,
 }
 
+# A contractor handover package: one zip that hides everything that matters.
+ARCHIVE_MEMBERS = {
+    "handover/EXAMPLE_BAY.scd": SCD,
+    "handover/line1.L5X": L5X,
+    "handover/switches/EX-SW-BAY1_running-config.cfg": SWITCH_CFG,
+    "handover/docs/commissioning_report.pdf": "%PDF-1.4\nfabricated\n",
+    "handover/keys/id_rsa": KEYFILE,
+}
+ARCHIVES = {"vendor/exchange/EXAMPLE_handover_2026.zip": ARCHIVE_MEMBERS}
+
 OLD = {"archive/2020/plant_full_backup.bak": 2200,
        "records/REC_01_20260102.cfg": 900}
 
@@ -113,6 +123,13 @@ def main() -> None:
         path = ROOT / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
+    import zipfile
+    for rel, members in ARCHIVES.items():
+        path = ROOT / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for name, content in members.items():
+                zf.writestr(name, content)
     for rel, days in OLD.items():
         path = ROOT / rel
         old = time.time() - days * 86400
@@ -120,7 +137,8 @@ def main() -> None:
     # one world-readable restricted file, where the platform supports it
     with contextlib.suppress(OSError):
         os.chmod(ROOT / "vendor/exchange/line1.L5X", 0o666)
-    print(f"wrote {len(FILES)} fabricated files to {ROOT}")
+    print(f"wrote {len(FILES)} fabricated files and {len(ARCHIVES)} archive(s) "
+          f"to {ROOT}")
 
 
 if __name__ == "__main__":

@@ -111,6 +111,8 @@ def assess(objects: List[DataObject], catalogue: Catalogue, rules: RuleSet,
                 findings.append(_finding(rules, "DATA-SECRET-CLEARTEXT", sig["label"]))
 
         loc_ids = {s["id"] for s in signals}
+        exposed = bool(loc_ids & {"location:shared", "location:vendor",
+                                  "location:cloud", "location:removable"})
         if rank >= 3:  # restricted
             if loc_ids & {"location:shared", "location:vendor", "location:personal"}:
                 where = ", ".join(s["label"] for s in signals if s["id"] in loc_ids
@@ -120,16 +122,22 @@ def assess(objects: List[DataObject], catalogue: Catalogue, rules: RuleSet,
                 where = ", ".join(s["label"] for s in signals
                                   if s["id"] in {"location:cloud", "location:removable"})
                 findings.append(_finding(rules, "DATA-RESTRICTED-EGRESS", where))
-            # On POSIX almost everything is o+r, so that alone is not a finding:
-            # world-WRITABLE always is, and world-readable only in an exposed area.
-            exposed = bool(loc_ids & {"location:shared", "location:vendor",
-                                      "location:cloud", "location:removable"})
-            if obj.world_writable or (obj.world_readable and exposed):
-                signals.append({"id": "perm:world", "label": "Weak file permissions",
-                                "weight": 3})
-                findings.append(_finding(
-                    rules, "DATA-WORLD-READABLE",
-                    f"mode {obj.mode:o}" + (" (world writable)" if obj.world_writable else "")))
+
+        # Who can actually read it. This is evidence, not a guess from the path.
+        if rank >= 2 and obj.acl.available:
+            writers = obj.acl.broad_writers()
+            readers = obj.acl.broad_readers()
+            if obj.acl.source == "posix" and not exposed:
+                # On POSIX nearly everything is o+r; alone that is not a finding.
+                readers = []
+            if writers or readers:
+                signals.append({"id": "acl:broad", "label": "Broad access", "weight": 4})
+                detail = obj.acl.describe() or "broad principals"
+                finding = _finding(rules, "DATA-BROAD-ACCESS",
+                                   f"{detail} [{obj.acl.source}]")
+                if rank >= 3 and writers:
+                    finding["severity"] = "critical"
+                findings.append(finding)
 
         if zone and rank > sensitivity_rank(zone.max_class):
             signals.append({"id": "zone:violation", "label": "Above zone class", "weight": 4})
