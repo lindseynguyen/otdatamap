@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "otdatamap"
-version = "0.5.0"
+version = "0.5.1"
 description = "Read-only data classification, inventory and data-risk analysis for OT/ICS environments"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
-authors = [{ name = "MrDuc Nguyen", email = "" }]
+authors = [{ name = "MrDuc Nguyen" }]
 keywords = ["ot", "ics", "scada", "iec62443", "data-classification", "risk", "security"]
 classifiers = [
   "Development Status :: 3 - Alpha",

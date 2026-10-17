@@ -558,3 +558,29 @@ def test_cli_learn(tmp_path):
                         "--quiz", "--seed", "1"],
                        cwd=root, capture_output=True, text=True, check=False)
     assert r.returncode == 0 and pack.read_text().startswith("<!doctype html>")
+
+
+# ------------------------------------------------------------------ packaging
+def test_pyproject_is_installable_metadata():
+    """An empty author email makes `pip install -e .` fail before it starts."""
+    root = Path(__file__).resolve().parents[1]
+    text = (root / "pyproject.toml").read_text(encoding="utf-8")
+    assert 'email = ""' not in text, "empty author email breaks pip install"
+    try:
+        import tomllib
+    except ModuleNotFoundError:
+        return
+    data = tomllib.loads(text)
+    project = data["project"]
+    for author in project.get("authors", []):
+        assert author.get("email", "x"), "author email must be absent or valid"
+    import otdatamap
+    assert project["version"] == otdatamap.__version__
+
+
+def test_cli_survives_a_closed_pipe():
+    root = Path(__file__).resolve().parents[1]
+    proc = subprocess.run(
+        f'{sys.executable} -m otdatamap attack | head -3',
+        shell=True, cwd=root, capture_output=True, text=True, check=False)
+    assert "BrokenPipeError" not in proc.stderr
